@@ -1,0 +1,16 @@
+Description: Allows the SIP program to reveive flow from remote sensors
+Copyright 2023
+Author: Pedro Santos
+Email:
+License: GNU GPL 3.0
+
+Requirements:
+
+##### List all plugin files below preceded by a blank line [file_name.ext path] relative to SIP directory #####
+
+flow_multi_remote.py plugins
+flow_multi_remote_aux.py plugins
+flow_multi_home.html templates
+flow_multi_settings.html templates
+flow_multi_remote.json data (generated)
+flow_multi_remote.manifest plugins/manifests

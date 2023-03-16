@@ -1,0 +1,105 @@
+$def with(commandsFlowMIn)
+
+$var title: $_(u'SIP ADV Plugin')
+$var page: advance_control
+
+<script>
+	// Initialize behaviors
+	jQuery(document).ready(function () {
+		jQuery("#cSubmit").click(function () {
+			jQuery("#flowSetId").submit();
+		});
+	});
+</script>
+
+
+<div id="plugin">
+	<!--     <div class="title">Command Line Control -->
+	<!--     <button class="execute" id="docButton" type="button" >$_('Help')</button> -->
+	<!--     </div> -->
+	<div>
+		<a href="./flow-add-new">ADD new Flow Sensors</a>
+
+		<br /><br />
+
+		<form id="flowSetId" name="flowSetId" action="/flow-set-save" method="get">
+			Rate to save if with flow:
+			<input type="number" size="10" value="${commandsFlowMIn['RateWithFlow']}" id="FlowRate2Save" name="FlowRate2Save"><br /><br />
+
+			Rate to save if with no flow:
+			<input type="number" size="10" value="${commandsFlowMIn['RateWitoutFlow']}" id="NoFlowRate2Save" name="NoFlowRate2Save"><br /><br />
+
+			Save data 2 DB:
+			<input type="checkbox" id="FlowSave2DB" name="FlowSave2DB" value="FlowSave2DB" ${"checked" if commandsFlowMIn['Save2DB'] else "" }><br /><br />
+
+			Flow rate units:
+			<select id="FlowRateUnits" name="FlowRateUnits">
+				$if commandsFlowMIn['FlowRateUnits'] == 'Lmin':
+					<option value="Lmin" selected>L/min</option>
+				$else:
+					<option value="Lmin">L/min</option>
+
+				$if commandsFlowMIn['FlowRateUnits'] == 'Lhour':
+					<option value="Lhour" selected>L/hour</option>
+				$else:
+					<option value="Lhour">L/hour</option>
+
+				$if commandsFlowMIn['FlowRateUnits'] == 'm3hour':
+					<option value="m3hour" selected>m^3/hour</option>
+				$else:
+					<option value="m3hour">m^3/hour</option>
+
+				$if commandsFlowMIn['FlowRateUnits'] == 'galmin':
+					<option value="galmin" selected>gallon/min</option>
+				$else:
+					<option value="galmin">gallon/min</option>
+
+				$if commandsFlowMIn['FlowRateUnits'] == 'galh':
+					<option value="galh" selected>gallon/hour</option>
+				$else:
+					<option value="galh">gallon/hour</option>
+			</select>
+			<br /><br />
+
+			Wather accumulate unit:
+			<select id="WatherSumUnits" name="WatherSumUnits">
+				$if commandsFlowMIn['FlowAccUnits'] == 'liters':
+					<option value="liters" selected>Liters</option>
+				$else:
+					<option value="liters">Liters</option>
+
+				$if commandsFlowMIn['FlowAccUnits'] == 'm3':
+					<option value="m3" selected>m^3</option>
+				$else:
+					<option value="m3">m^3</option>
+
+				$if commandsFlowMIn['FlowAccUnits'] == 'gallonUS':
+					<option value="gallonUS" selected>gallon (US)</option>
+				$else:
+					<option value="gallonUS">gallon (US)</option>
+			</select>
+			<br /><br />
+
+			$for i in range(len(commandsFlowMIn['FlowRef'])):
+				<b>Flow counter number : ${i + 1}</b><br />
+
+				Flow sensor reference:<br />
+				<input type="text" size="50" value="${commandsFlowMIn['FlowRef'][i]}" id="FlowRef${i}" name="FlowRef${i}"><br /><br />
+
+				Flow sensor convertion factor:<br /><br />
+				<input type="number" size="50" value="${commandsFlowMIn['ConvertionFactor'][i]}" id="ConvertionFactor${i}" name="ConvertionFactor${i}"><br /><br />
+
+				Flow sensor correction factor:<br />
+				<input type="text" size="50" value="${commandsFlowMIn['CorrectionFactor'][i]}" id="CorrectionFactor${i}" name="CorrectionFactor${i}"><br /><br />
+
+				Flow sensor slow pulse: <input type="checkbox" id="FlowSlowPulse${i}" name="SlowPulse${i}" value="SlowPulse" ${"checked" if commandsFlowMIn['SlowPulse'][i] else "" }><br /><br />
+
+				<br /><br />
+		</form>
+	</div>
+
+	<div class="controls">
+		<button id="cSubmit" class="submit"><b>$_(u'Submit')</b></button>
+		<button id="cCancel" class="cancel danger">$_(u'Cancel')</button>
+	</div>
+</div>
