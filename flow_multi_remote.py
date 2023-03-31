@@ -27,7 +27,7 @@ from webpages import ProtectedPage
 try:
     from db_logger import db_logger_read_definitions
     from db_logger_generic_table import create_generic_table, add_date_generic_table
-    from db_logger_flow import get_last_accum_value, init_db_if_needed, add_new_register
+    from db_logger_flow import get_last_accum_value, init_db_if_needed, add_new_register, check_and_add_flow
     withDBLogger = True
 except ImportError:
     withDBLogger = False
@@ -45,6 +45,7 @@ urls.extend(
         u"/flow-set-save", u"plugins.flow_multi_remote.settings_save",
         u"/flow-add-new", u"plugins.flow_multi_remote.setting_add_new",
         u"/flow-arduino", u"plugins.flow_multi_remote.setting_arduino",
+        u"/flow-arduino-1-data", u"plugins.flow_multi_remote.setting_arduino_first_data",
         u"/flow-https-inc", u"plugins.flow_multi_remote.flow_http_increment",
         u"/flow-json", u"plugins.flow_multi_remote.settings_json",
         u"/flow-update", u"plugins.flow_multi_remote.update_reading",
@@ -55,8 +56,6 @@ gv.plugin_menu.append([u"Flow Muti Remote", u"/flow-home"])
 
 commandsFlowM = {}
 commandsFlowMLock = Lock()
-
-lastDataFlow = {} # Value when the program start
 
 commandsFlowQueu = queue.Queue()
 threadProcFlow = None
@@ -89,7 +88,6 @@ def threadProcessData():
                 validDigit = False
                 flowRate = 0
                 flowAccum = 0
-                flowAccumBias = 0
 
                 try:
                     flowRate = float(dataRead["FR-" + localDef["FlowRef"][i]])
@@ -111,14 +109,7 @@ def threadProcessData():
                         flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["DBDateSAve"] = None
                         flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["HasFlow"] = False
 
-                        if "F-" + localDef["FlowRef"][i] in lastDataFlow:
-                            flowDataOnDemand["FL-" + localDef["FlowRef"][i]]['Bias'] = lastDataFlow["F-" + localDef["FlowRef"][i]]['lastAccum']
-                        else:
-                            flowDataOnDemand["FL-" + localDef["FlowRef"][i]]['Bias'] = 0
-
-                    flowAccumBias = flowDataOnDemand["FL-" + localDef["FlowRef"][i]]['Bias'] + flowAccum
-
-                    flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["AccumFlow"].append(flowAccumBias)
+                    flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["AccumFlow"].append(flowAccum)
                     flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["RateFlow"].append(flowRate)
                     flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["FlowDate"].append(dataRead["DateTime"])
 
@@ -155,7 +146,8 @@ def threadProcessData():
 
                     # Outside lock save to DB if case for
                     if need2Save2DB:
-                        add_new_register(dbDefinitions, localDef["FlowRef"][i], flowRate, flowAccumBias, dataRead["DateTime"])
+                        check_and_add_flow(dbDefinitions, localDef["FlowRef"][i], localDef["SensorPort"][i], localDef["CorrectionFactor"][i], localDef["SlowPulse"][i])
+                        add_new_register(dbDefinitions, localDef["FlowRef"][i], flowRate, flowAccum, dataRead["DateTime"])
 
 def threadProcessDataInc():
     global lastDataFlow, flowIncData
@@ -263,7 +255,7 @@ def threadProcessDataIncCheckStop():
             add_new_register(dbDefinitions, localDef["FlowRef"][i], data2SaveDB[0], data2SaveDB[2], data2SaveDB[1])
 
 def load_flows():
-    global commandsFlowM, lastDataFlow
+    global commandsFlowM, threadProcFlowIsRunning, threadProcFlow, threadProcFlowIncIsRunning, threadProcFlowInc, threadProcFlowIncStopIsRunning, threadProcFlowIncStop
 
     try:
         with open(u"./data/flow_multi_remote.json", u"r") as f:
@@ -272,8 +264,6 @@ def load_flows():
         commandsFlowM = {"FlowRef": [], "ConvertionFactor": [], "CorrectionFactor": [], "SlowPulse": [], "SensorPort": [], "Save2DB": True, "RateWithFlow": 5, "RateWitoutFlow": 15, "FlowRateUnits": "L/min", "FlowAccUnits": "L"}
 
     dbDefinitions = db_logger_read_definitions()
-
-    lastDataFlow = get_last_accum_value(dbDefinitions, commandsFlowM)
 
     init_db_if_needed(dbDefinitions, commandsFlowM)
 
@@ -286,7 +276,7 @@ def load_flows():
     threadProcFlowInc.start()
 
     threadProcFlowIncStopIsRunning = True
-    threadProcFlowIncStop = Thread(target = threadProcFlowIncStop)
+    threadProcFlowIncStop = Thread(target = threadProcessDataIncCheckStop)
     threadProcFlowIncStop.start()
 
 load_flows()
@@ -376,13 +366,13 @@ class settings_save(ProtectedPage):
         commandsFlowMLock.acquire()
         if "FlowRate2Save" in qdict:
             try:
-                commandsFlowM["RateWithFlow"] = qdict["FlowRate2Save"]
+                commandsFlowM["RateWithFlow"] = float(qdict["FlowRate2Save"])
             except:
                 pass
 
         if "NoFlowRate2Save" in qdict:
             try:
-                commandsFlowM["RateWitoutFlow"] = qdict["NoFlowRate2Save"]
+                commandsFlowM["RateWitoutFlow"] = float(qdict["NoFlowRate2Save"])
             except:
                 pass
 
@@ -431,6 +421,29 @@ class setting_add_new(ProtectedPage):
         commandsFlowMLock.release()
 
         raise web.seeother(u"/flow-set")
+
+class setting_arduino_first_data(ProtectedPage):
+    """Get last values save"""
+
+    def GET(self):
+        commandsFlowMLock.acquire()
+        flowDefinitionLocal = copy.deepcopy(commandsFlowM)
+        commandsFlowMLock.release()
+
+        dbDefinitions = db_logger_read_definitions()
+        dataValues = get_last_accum_value(dbDefinitions, flowDefinitionLocal)
+
+        if len(dataValues) > 0:
+            dataOut = "|"
+        else:
+            dataOut = ""
+
+        for keyValve in dataValues:
+            valveRef = keyValve[2:]
+            valueAccum = dataValues[keyValve]["AccumFlow"]
+            dataOut = dataOut + str(valveRef) + "|" + str(valueAccum) + "|"
+
+        return dataOut
 
 class setting_arduino(ProtectedPage):
     """Return status of valve"""
