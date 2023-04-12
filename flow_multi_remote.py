@@ -64,6 +64,7 @@ flowDataOnDemand = {}
 flowDataOnDemandLock = Lock()
 
 commFlowIncQueu = queue.Queue() # queue of http request of incremental flow
+lastDataFlow = {}
 threadProcFlowInc = None # Thread thad consupt http produced
 threadProcFlowIncStop = None # Thread to check if valve flow stop http pulsers
 threadProcFlowIncIsRunning = False # Thread Flow is running
@@ -150,10 +151,10 @@ def threadProcessData():
                         add_new_register(dbDefinitions, localDef["FlowRef"][i], flowRate, flowAccum, dataRead["DateTime"])
 
 def threadProcessDataInc():
-    global lastDataFlow, flowIncData
+    global lastDataFlow, flowIncData, commFlowIncQueu
 
     while threadProcFlowIncIsRunning:
-        dataRead = commandsFlowQueu.get()
+        dataRead = commFlowIncQueu.get()
 
         commandsFlowMLock.acquire()
         localDef = copy.deepcopy(commandsFlowM)
@@ -177,7 +178,7 @@ def threadProcessDataInc():
                         flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] = False
 
                         if "F-" + localDef["FlowRef"][i] in lastDataFlow:
-                            flowIncData["F-" + localDef["FlowRef"][i]]["Bias"] = lastDataFlow["F-" + localDef["FlowRef"][i]]["AccumFlow"] # bias from last reg
+                            flowIncData["F-" + localDef["FlowRef"][i]]["Bias"] = lastDataFlow["F-" + localDef["FlowRef"][i]] # bias from last reg
                         else:
                             flowIncData["F-" + localDef["FlowRef"][i]]["Bias"] = 0 # if no register, bias is zero
 
@@ -190,7 +191,7 @@ def threadProcessDataInc():
                         flowIncData["F-" + localDef["FlowRef"][i]]["Read"].append([dataRead['DateTime'], incrementL + flowIncData["F-" + localDef["FlowRef"][i]]["Bias"]])
 
                     if len(flowIncData["F-" + localDef["FlowRef"][i]]["Read"]) > 20:
-                        flowIncData["F-" + localDef["FlowRef"][i]]["Read"].remove(0)
+                        del flowIncData["F-" + localDef["FlowRef"][i]]["Read"][0]
                     flowIncDataLock.release()
 
 def threadProcessDataIncCheckStop():
@@ -213,7 +214,7 @@ def threadProcessDataIncCheckStop():
             if "F-" + localDef["FlowRef"][i] in flowIncData and len(flowIncData["F-" + localDef["FlowRef"][i]]["Read"]) > 4:
                 diffTimesList = []
                 for j in range(1, len(flowIncData["F-" + localDef["FlowRef"][i]]["Read"])):
-                    diffTimesList.append((flowIncData["F-" + localDef["FlowRef"][i]]["Read"][j] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][j - 1]).total_seconds())
+                    diffTimesList.append((flowIncData["F-" + localDef["FlowRef"][i]]["Read"][j][0] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][j - 1][0]).total_seconds())
 
                 # estimate median
                 diffTimesList.sort()
@@ -221,13 +222,13 @@ def threadProcessDataIncCheckStop():
                 resMed = (diffTimesList[mid] + diffTimesList[~mid]) / 2.0
 
                 # if median > 2X last reading, considering STOP
-                isStop = (datetime.datetime.now() - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1]).total_seconds() > 2*resMed
+                isStop = (datetime.datetime.now() - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0]).total_seconds() > 2*resMed
                 if isStop:
                     flowIncData["F-" + localDef["FlowRef"][i]]["FlowRate"] = 0
                 else:
-                    last2RegDif = (flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-2][0] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0]).total_seconds()
+                    last2RegDif = (flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-2][0]).total_seconds()
                     if last2RegDif <= 2*resMed:
-                        litersBetweenReading = flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-2][1] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][1]
+                        litersBetweenReading = flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][1] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-2][1]
                         flowIncData["F-" + localDef["FlowRef"][i]]["FlowRate"] = litersBetweenReading / (last2RegDif / 60.0)
                     else:
                         flowIncData["F-" + localDef["FlowRef"][i]]["FlowRate"] = 0
@@ -237,35 +238,45 @@ def threadProcessDataIncCheckStop():
                 if flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"] == None:
                     need2AddDB = True
                 elif isStop:
-                    if (flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] and localDef["RateWitoutFlow"] == 0) or \
-                        (localDef["RateWitoutFlow"] > 0 and (flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0] - flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"]).total_seconds()  / 60.0 > localDef["RateWitoutFlow"]):
+                    if flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] or localDef["RateWitoutFlow"] == 0 or \
+                        (localDef["RateWitoutFlow"] > 0 and (datetime.datetime.now() - flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"]).total_seconds()  / 60.0 > localDef["RateWitoutFlow"]):
                         need2AddDB = True
+                    flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] = False # no flow detected in valve
                 elif not isStop:
                     # wather is passing
-                    if localDef["RateWithFlow"] == 0 or (localDef["RateWithFlow"] > 0 and (flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-2][0]).total_seconds() / 60.0 > localDef["RateWithFlow"]):
+                    if localDef["RateWithFlow"] == 0 or not flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] or (localDef["RateWithFlow"] > 0 and (flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0] - flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"]).total_seconds() / 60.0 > localDef["RateWithFlow"]):
                         need2AddDB = True
 
                 if need2AddDB:
-                    data2SaveDBList.append([flowIncData["F-" + localDef["FlowRef"][i]]["FlowRate"], flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0], flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][1]])
+                    data2SaveDBList.append([flowIncData["F-" + localDef["FlowRef"][i]]["FlowRate"], flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0], flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][1], localDef["FlowRef"][i]])
                     flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"] = flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0]
                     flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] = not isStop
         flowIncDataLock.release()
 
         for data2SaveDB in data2SaveDBList:
-            add_new_register(dbDefinitions, localDef["FlowRef"][i], data2SaveDB[0], data2SaveDB[2], data2SaveDB[1])
+            add_new_register(dbDefinitions, data2SaveDB[3], data2SaveDB[0], data2SaveDB[2], data2SaveDB[1])
 
 def load_flows():
-    global commandsFlowM, threadProcFlowIsRunning, threadProcFlow, threadProcFlowIncIsRunning, threadProcFlowInc, threadProcFlowIncStopIsRunning, threadProcFlowIncStop
+    global commandsFlowM, threadProcFlowIsRunning, threadProcFlow, threadProcFlowIncIsRunning, threadProcFlowInc, threadProcFlowIncStopIsRunning, threadProcFlowIncStop, lastDataFlow
 
     try:
         with open(u"./data/flow_multi_remote.json", u"r") as f:
             commandsFlowM = json.load(f)  # Read the commands from file
     except IOError:  #  If file does not exist create file with defaults.
-        commandsFlowM = {"FlowRef": [], "ConvertionFactor": [], "CorrectionFactor": [], "SlowPulse": [], "SensorPort": [], "Save2DB": True, "RateWithFlow": 5, "RateWitoutFlow": 15, "FlowRateUnits": "L/min", "FlowAccUnits": "L"}
+        commandsFlowM = {"FlowRef": [], "ConvertionFactor": [], "CorrectionFactor": [], "SlowPulse": [], "PulseFromHTTP": [], "SensorPort": [], "Save2DB": True, "RateWithFlow": 5, "RateWitoutFlow": 15, "FlowRateUnits": "L/min", "FlowAccUnits": "L"}
 
     dbDefinitions = db_logger_read_definitions()
 
     init_db_if_needed(dbDefinitions, commandsFlowM)
+
+    # get values from HTTPS increment, source don´t have memory, only send increments
+    dataValues = get_last_accum_value(dbDefinitions, commandsFlowM)
+    for keyValve in dataValues:
+        valveRef = keyValve[2:]
+        indexRef = commandsFlowM["FlowRef"].index(valveRef)
+        if commandsFlowM["PulseFromHTTP"][indexRef]:
+            valueAccum = dataValues[keyValve]["AccumFlow"]
+            lastDataFlow["F-" + valveRef] = valueAccum
 
     threadProcFlowIsRunning = True
     threadProcFlow = Thread(target = threadProcessData)
@@ -398,6 +409,7 @@ class settings_save(ProtectedPage):
                 except:
                     pass
             commandsFlowM["SlowPulse"][i] = "SlowPulse" + str(i) in qdict
+            commandsFlowM["PulseFromHTTP"][i] = "FlowHTTPPulse" + str(i) in qdict
 
         # save 2 file definitions
         with open(u"./data/flow_multi_remote.json", u"w") as f:

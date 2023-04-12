@@ -94,6 +94,8 @@ $var page: advance_control
 
 				Flow sensor slow pulse: <input type="checkbox" id="FlowSlowPulse${i}" name="SlowPulse${i}" value="SlowPulse" ${"checked" if commandsFlowMIn['SlowPulse'][i] else "" }><br /><br />
 
+				Signal by https: <input type="checkbox" id="FlowHTTPPulse${i}" name="FlowHTTPPulse${i}" value="HTTPPulse" ${"checked" if commandsFlowMIn['PulseFromHTTP'][i] else "" }><br /><br />
+
 				<br /><br />
 		</form>
 	</div>
