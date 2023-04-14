@@ -315,6 +315,10 @@ def getFlowReading(flowRef):
         dataOut["RateFlow"] = flowIncData["F-" + flowRef]["FlowRate"]
         dataOut["AccumFlow"] = flowIncData["F-" + flowRef]["Read"][-1][1]
         dataOut["IsValid"] = True
+    elif "F-" + flowRef in lastDataFlow:
+        dataOut["RateFlow"] = 0
+        dataOut["AccumFlow"] = lastDataFlow["F-" + flowRef]
+        dataOut["IsValid"] = True
 
     flowDataOnDemandLock.release()
     flowIncDataLock.release()
@@ -496,7 +500,19 @@ class get_value_on_demand_flow(ProtectedPage):
         if "FlowRef" in qdict:
             sensorData = getFlowReading(qdict["FlowRef"])
             if sensorData["IsValid"]:
-                str2Return = str(sensorData["RateFlow"])
+                commandsFlowMLock.acquire()
+                # by default use L/min, if in another units, need to be converted
+                if commandsFlowM["FlowRateUnits"] == 'Lmin':
+                    str2Return = str(sensorData["RateFlow"]) +" L/min"
+                elif commandsFlowM["FlowRateUnits"] == 'Lhour':
+                    str2Return = str(convertLitersByMinute2LitersByHour(sensorData["RateFlow"])) +" L/hour"
+                elif commandsFlowM["FlowRateUnits"] == 'm3hour':
+                    str2Return = str(convertLitersByMinute2m3ByHour(sensorData["RateFlow"])) +" m^3/h"
+                elif commandsFlowM["FlowRateUnits"] == 'galmin':
+                    str2Return = str(convertLitersByMinute2GallonsByMinute(sensorData["RateFlow"])) +" gal/min"
+                elif commandsFlowM["FlowRateUnits"] == 'galh':
+                    str2Return = str(convertLitersByMinute2GallonsByHour(sensorData["RateFlow"])) +" gal/hour"
+                commandsFlowMLock.release()
 
         return str2Return
 
@@ -510,6 +526,13 @@ class get_value_on_demand_acc(ProtectedPage):
         if "FlowRef" in qdict:
             sensorData = getFlowReading(qdict["FlowRef"])
             if sensorData["IsValid"]:
-                str2Return = str(sensorData["AccumFlow"])
+                commandsFlowMLock.acquire()
+                if commandsFlowM["FlowAccUnits"] == 'L':
+                    str2Return = str(sensorData["AccumFlow"]) +" L"
+                elif commandsFlowM["FlowAccUnits"] == 'm3':
+                    str2Return = str(convertLiters2m3(sensorData["AccumFlow"])) +" m^3"
+                elif commandsFlowM["FlowAccUnits"] == 'gallonUS':
+                    str2Return = str(convertLiters2Gal(sensorData["AccumFlow"])) +" gal"
+                commandsFlowMLock.release()
 
         return str2Return

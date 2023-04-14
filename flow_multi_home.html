@@ -3,11 +3,71 @@ $def with(commandsFlowMIn)
 $var title: $_(u'SIP flow multi home')
 $var page: flow_multi_home
 
+<script>
+	function getXHR() {
+		if (window.XMLHttpRequest) { // code for IE7+, Firefox, Chrome, Opera, Safari
+			return new XMLHttpRequest();
+		}
+		else { // code for IE6, IE5
+			return new ActiveXObject("Microsoft.XMLHTTP");
+		}
+	}
+
+	function updateFlowStatus() {
+		var xmlhttp = getXHR();
+
+        $for i in range(len(commandsFlowMIn['FlowRef'])):
+			xmlhttp.open("GET", "/flow-get-flow-demand?FlowRef=${commandsFlowMIn['FlowRef'][i]}", false);
+			xmlhttp.send(null);
+			document.getElementById("flowRate${i}").innerHTML = xmlhttp.responseText;
+
+			xmlhttp.open("GET", "/flow-get-acc-demand?FlowRef=${commandsFlowMIn['FlowRef'][i]}", false);
+			xmlhttp.send(null);
+			document.getElementById("flowAccum${i}").innerHTML = xmlhttp.responseText;
+	}
+
+	const tellTime = async function () {
+		updateFlowStatus();
+	}
+
+	const minutes = 0.1;
+	const interval = minutes * 60 * 1000;
+
+	setInterval(function () {
+		// catch all the errors.
+		tellTime().catch(console.log);
+	}, interval);
+
+	document.addEventListener('DOMContentLoaded', function () {
+		updateFlowStatus();
+	}, false);
+</script>
+
 <div id="plugin">
 	<!--     <div class="title">Command Line Control -->
 	<!--     <button class="execute" id="docButton" type="button" >$_('Help')</button> -->
 	<!--     </div> -->
 	<div>
-		Ola Mundo!!!
+		<table style="width:100%" border="1">
+			<tr>
+				<th>Valve Name</th>
+				<th>Flow rate</th>
+				<th>Flow accumulate</th>
+			</tr>
+			$for i in range(len(commandsFlowMIn['FlowRef'])):
+				<tr>
+					<td>
+						<b>${commandsFlowMIn['FlowRef'][i]}</b>
+					</td>
+					<td>
+						<b id="flowRate${i}">Flow counter number : ${i + 1}</b>
+					</td>
+					<td>
+						<b id="flowAccum${i}">Flow accum : ${i + 1}</b>
+					</td>
+				</tr>
+		</table>
 	</div>
+
+	<br /><br />
 </div>
