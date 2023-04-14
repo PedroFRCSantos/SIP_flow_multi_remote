@@ -312,7 +312,11 @@ def getFlowReading(flowRef):
 
     # check in pulse https request
     if "F-" + flowRef in flowIncData:
-        dataOut["RateFlow"] = flowIncData["F-" + flowRef]["FlowRate"]
+        if flowIncData["F-" + flowRef]["HasFlow"]:
+            dataOut["RateFlow"] = flowIncData["F-" + flowRef]["FlowRate"]
+        else:
+            dataOut["RateFlow"] = 0
+
         dataOut["AccumFlow"] = flowIncData["F-" + flowRef]["Read"][-1][1]
         dataOut["IsValid"] = True
     elif "F-" + flowRef in lastDataFlow:
@@ -503,15 +507,15 @@ class get_value_on_demand_flow(ProtectedPage):
                 commandsFlowMLock.acquire()
                 # by default use L/min, if in another units, need to be converted
                 if commandsFlowM["FlowRateUnits"] == 'Lmin':
-                    str2Return = str(sensorData["RateFlow"]) +" L/min"
+                    str2Return = str(round(sensorData["RateFlow"], 2)) +" L/min"
                 elif commandsFlowM["FlowRateUnits"] == 'Lhour':
-                    str2Return = str(convertLitersByMinute2LitersByHour(sensorData["RateFlow"])) +" L/hour"
+                    str2Return = str(round(convertLitersByMinute2LitersByHour(sensorData["RateFlow"]), 2)) +" L/hour"
                 elif commandsFlowM["FlowRateUnits"] == 'm3hour':
-                    str2Return = str(convertLitersByMinute2m3ByHour(sensorData["RateFlow"])) +" m^3/h"
+                    str2Return = str(round(convertLitersByMinute2m3ByHour(sensorData["RateFlow"]), 5)) +" m^3/h"
                 elif commandsFlowM["FlowRateUnits"] == 'galmin':
-                    str2Return = str(convertLitersByMinute2GallonsByMinute(sensorData["RateFlow"])) +" gal/min"
+                    str2Return = str(round(convertLitersByMinute2GallonsByMinute(sensorData["RateFlow"]), 5)) +" gal/min"
                 elif commandsFlowM["FlowRateUnits"] == 'galh':
-                    str2Return = str(convertLitersByMinute2GallonsByHour(sensorData["RateFlow"])) +" gal/hour"
+                    str2Return = str(round(convertLitersByMinute2GallonsByHour(sensorData["RateFlow"]), 5)) +" gal/hour"
                 commandsFlowMLock.release()
 
         return str2Return
@@ -527,12 +531,12 @@ class get_value_on_demand_acc(ProtectedPage):
             sensorData = getFlowReading(qdict["FlowRef"])
             if sensorData["IsValid"]:
                 commandsFlowMLock.acquire()
-                if commandsFlowM["FlowAccUnits"] == 'L':
-                    str2Return = str(sensorData["AccumFlow"]) +" L"
+                if commandsFlowM["FlowAccUnits"] == 'liters':
+                    str2Return = str(round(sensorData["AccumFlow"], 2)) +" L"
                 elif commandsFlowM["FlowAccUnits"] == 'm3':
-                    str2Return = str(convertLiters2m3(sensorData["AccumFlow"])) +" m^3"
+                    str2Return = str(round(convertLiters2m3(sensorData["AccumFlow"]), 5)) +" m^3"
                 elif commandsFlowM["FlowAccUnits"] == 'gallonUS':
-                    str2Return = str(convertLiters2Gal(sensorData["AccumFlow"])) +" gal"
+                    str2Return = str(round(convertLiters2Gal(sensorData["AccumFlow"]), 5)) +" gal"
                 commandsFlowMLock.release()
 
         return str2Return

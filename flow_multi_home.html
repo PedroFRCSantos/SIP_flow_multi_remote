@@ -4,6 +4,16 @@ $var title: $_(u'SIP flow multi home')
 $var page: flow_multi_home
 
 <script>
+	jQuery(document).ready(function () {
+		jQuery("button#Button").click(function () {
+			window.location = "/flow-home";
+		});
+
+		jQuery("button#defButton").click(function () {
+			window.location = "/flow-set";
+		});
+	});
+
 	function getXHR() {
 		if (window.XMLHttpRequest) { // code for IE7+, Firefox, Chrome, Opera, Safari
 			return new XMLHttpRequest();
@@ -44,9 +54,15 @@ $var page: flow_multi_home
 </script>
 
 <div id="plugin">
-	<!--     <div class="title">Command Line Control -->
-	<!--     <button class="execute" id="docButton" type="button" >$_('Help')</button> -->
-	<!--     </div> -->
+	<div>
+		<p>
+			<button class="execute" id="Button" type="button">Home</button>
+			<button class="execute" id="defButton" type="button">Definition</button>
+		</p>
+	</div>
+
+	<br /><br />
+
 	<div>
 		<table style="width:100%" border="1">
 			<tr>
