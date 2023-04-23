@@ -27,7 +27,7 @@ from webpages import ProtectedPage
 try:
     from db_logger import db_logger_read_definitions
     from db_logger_generic_table import create_generic_table, add_date_generic_table
-    from db_logger_flow import get_last_accum_value, init_db_if_needed, add_new_register, check_and_add_flow
+    from db_logger_flow import get_last_accum_value, init_db_if_needed, add_new_register, check_and_add_flow, add_valve_flow, get_last_valve_accum_val
     withDBLogger = True
 except ImportError:
     withDBLogger = False
@@ -71,6 +71,11 @@ threadProcFlowIncIsRunning = False # Thread Flow is running
 threadProcFlowIncStopIsRunning = False # THread flow increment is running
 flowIncData = {} # Data of increment values
 flowIncDataLock = Lock()
+
+# variables related to each valves flow
+valveFlowCurrentVal = []
+valveFlowLastFlowReading = []
+valveFlowLock = Lock()
 
 def threadProcessData():
     global commandsFlowQueu, threadProcFlowIsRunning, commandsFlowM
@@ -147,8 +152,37 @@ def threadProcessData():
 
                     # Outside lock save to DB if case for
                     if need2Save2DB:
+                        # save valves if they are active
+                        listValues2Add = []
+
+                        valveFlowLock.acquire()
+                        for j in range(len(gv.srvals)):
+                            if gv.srvals[j] and j in localDef["ValvesAffected"][i]:  # station is on
+                                numberValvesActive = 0.0
+                                for l in range(len(gv.srvals)):
+                                    if gv.srvals[j] and l in localDef["ValvesAffected"][i]:  # station is on
+                                        numberValvesActive = numberValvesActive + 1.0
+
+                                # save to DB flow accumulate dividing by activated valves
+                                if localDef["FlowRef"][i] in valveFlowLastFlowReading[j]:
+                                    valveDif = flowAccum - valveFlowLastFlowReading[j][localDef["FlowRef"][i]]
+                                    valveFlowCurrentVal[j] = valveFlowCurrentVal[j] + (valveDif / numberValvesActive)
+
+                                    listValues2Add.append([j, valveFlowCurrentVal[j], flowRate / numberValvesActive])
+
+                                valveFlowLastFlowReading[j][localDef["FlowRef"][i]] = flowAccum
+                        valveFlowLock.release()
+
+                        # save raw data
                         check_and_add_flow(dbDefinitions, localDef["FlowRef"][i], localDef["SensorPort"][i], localDef["CorrectionFactor"][i], localDef["SlowPulse"][i])
                         add_new_register(dbDefinitions, localDef["FlowRef"][i], flowRate, flowAccum, dataRead["DateTime"])
+
+                        # save data from valves
+                        for dataVal2Save in listValues2Add:
+                            currValveId = dataVal2Save[0]
+                            currValveAccum = dataVal2Save[1]
+                            currValveFlow = dataVal2Save[2]
+                            add_valve_flow(dbDefinitions, currValveId, currValveFlow, currValveAccum, dataRead["DateTime"])
 
 def threadProcessDataInc():
     global lastDataFlow, flowIncData, commFlowIncQueu
@@ -263,7 +297,7 @@ def load_flows():
         with open(u"./data/flow_multi_remote.json", u"r") as f:
             commandsFlowM = json.load(f)  # Read the commands from file
     except IOError:  #  If file does not exist create file with defaults.
-        commandsFlowM = {"FlowRef": [], "ConvertionFactor": [], "CorrectionFactor": [], "SlowPulse": [], "PulseFromHTTP": [], "SensorPort": [], "Save2DB": True, "RateWithFlow": 5, "RateWitoutFlow": 15, "FlowRateUnits": "L/min", "FlowAccUnits": "L"}
+        commandsFlowM = {"FlowRef": [], "ConvertionFactor": [], "CorrectionFactor": [], "SlowPulse": [], "PulseFromHTTP": [], "SensorPort": [], "ValvesAffected": [], "Save2DB": True, "RateWithFlow": 5, "RateWitoutFlow": 15, "FlowRateUnits": "L/min", "FlowAccUnits": "L"}
 
     dbDefinitions = db_logger_read_definitions()
 
@@ -277,6 +311,13 @@ def load_flows():
         if commandsFlowM["PulseFromHTTP"][indexRef]:
             valueAccum = dataValues[keyValve]["AccumFlow"]
             lastDataFlow["F-" + valveRef] = valueAccum
+
+    for j in range(len(gv.srvals)):
+        valveFlowLastFlowReading.append({})
+
+        # Get value from DB
+        lastAccumValue = get_last_valve_accum_val(dbDefinitions, j)
+        valveFlowCurrentVal.append(lastAccumValue)
 
     threadProcFlowIsRunning = True
     threadProcFlow = Thread(target = threadProcessData)
@@ -419,6 +460,14 @@ class settings_save(ProtectedPage):
             commandsFlowM["SlowPulse"][i] = "SlowPulse" + str(i) in qdict
             commandsFlowM["PulseFromHTTP"][i] = "FlowHTTPPulse" + str(i) in qdict
 
+            commandsFlowM["ValvesAffected"][i] = []
+
+            for bid in range(0,gv.sd['nbrd']):
+                for s in range(0,8):
+                    sid = bid*8 + s;
+                    if "Flow"+ str(i) +"Valve"+ str(sid) in qdict:
+                        commandsFlowM["ValvesAffected"][i].append(sid)
+
         # save 2 file definitions
         with open(u"./data/flow_multi_remote.json", u"w") as f:
             json.dump(commandsFlowM, f, indent=4)
@@ -438,6 +487,7 @@ class setting_add_new(ProtectedPage):
         commandsFlowM["CorrectionFactor"].append(1)
         commandsFlowM["SlowPulse"].append(False)
         commandsFlowM["SensorPort"].append(0)
+        commandsFlowM["ValvesAffected"].append([])
         commandsFlowMLock.release()
 
         raise web.seeother(u"/flow-set")

@@ -38,6 +38,10 @@ $var page: advance_control
 
 		<br /><br />
 
+		<a href="./flow-add-new-virtual">ADD new Virtual Flow Sensors</a>
+
+		<br /><br />
+
 		<form id="flowSetId" name="flowSetId" action="/flow-set-save" method="get">
 			Rate to save if with flow:
 			<input type="number" size="10" value="${commandsFlowMIn['RateWithFlow']}" id="FlowRate2Save" name="FlowRate2Save"><br /><br />
@@ -110,7 +114,29 @@ $var page: advance_control
 
 				Flow sensor slow pulse: <input type="checkbox" id="FlowSlowPulse${i}" name="SlowPulse${i}" value="SlowPulse" ${"checked" if commandsFlowMIn['SlowPulse'][i] else "" }><br /><br />
 
-				Signal by https: <input type="checkbox" id="FlowHTTPPulse${i}" name="FlowHTTPPulse${i}" value="HTTPPulse" ${"checked" if commandsFlowMIn['PulseFromHTTP'][i] else "" }><br /><br />
+				Signal by https: <input type="checkbox" id="FlowHTTPPulse${i}" name="FlowHTTPPulse${i}" value="HTTPPulse" ${"checked" if commandsFlowMIn['PulseFromHTTP'][i] else "" }>
+
+				<br />
+
+				Is flow master
+
+				<br />
+
+				Flow afected by valves <br />
+				$for bid in range(0,gv.sd['nbrd']):
+					$for s in range(0,8):
+						$ sid = bid*8 + s;
+						${gv.snames[sid]} <input type="checkbox" id="Flow${i}Valve${sid}" name="Flow${i}Valve${sid}" value="FlowValve" ${"checked" if sid in commandsFlowMIn["ValvesAffected"][i] else "" }>
+
+				<br />
+
+				Tank counter (ckeck box)<br />
+				(Need tank plug in to work)
+
+				<br />
+
+				Pump counter (check box)<br />
+				(Need pump counter to work)
 
 				<br /><br />
 		</form>
