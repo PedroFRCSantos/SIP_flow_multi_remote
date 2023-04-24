@@ -77,112 +77,134 @@ valveFlowCurrentVal = []
 valveFlowLastFlowReading = []
 valveFlowLock = Lock()
 
+
 def threadProcessData():
     global commandsFlowQueu, threadProcFlowIsRunning, commandsFlowM
 
     dbDefinitions = db_logger_read_definitions()
 
     while threadProcFlowIsRunning:
-        dataRead = commandsFlowQueu.get()
+        dataRead = commandsFlowQueu.get()        
 
+        listValuesValves2Add = {}
+        listFlow2Save = []
+
+        # lok global variables relative to flow meter and valves
         commandsFlowMLock.acquire()
-        localDef = copy.deepcopy(commandsFlowM)
-        commandsFlowMLock.release()
+        flowDataOnDemandLock.acquire()
+        valveFlowLock.acquire()
 
-        for i in range(len(localDef["FlowRef"])):
-            if "FR-" + localDef["FlowRef"][i] in dataRead and "FA-" + localDef["FlowRef"][i] in dataRead and "DateTime" in dataRead:
+        for i in range(len(commandsFlowM["FlowRef"])):
+            if "FR-" + commandsFlowM["FlowRef"][i] in dataRead and "FA-" + commandsFlowM["FlowRef"][i] in dataRead and "DateTime" in dataRead:
                 validDigit = False
                 flowRate = 0
                 flowAccum = 0
 
                 try:
-                    flowRate = float(dataRead["FR-" + localDef["FlowRef"][i]])
-                    flowAccum = float(dataRead["FA-" + localDef["FlowRef"][i]])
+                    flowRate = float(dataRead["FR-" + commandsFlowM["FlowRef"][i]])
+                    flowAccum = float(dataRead["FA-" + commandsFlowM["FlowRef"][i]])
                     validDigit = True
                 except:
                     pass
 
                 if validDigit:
                     # Check if exists initial value
-                    flowDataOnDemandLock.acquire()
-                    if "FL-" + localDef["FlowRef"][i] not in flowDataOnDemand:
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]] = {}
+                    if "FL-" + commandsFlowM["FlowRef"][i] not in flowDataOnDemand:
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]] = {}
 
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["AccumFlow"] = []
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["RateFlow"] = []
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["FlowDate"] = []
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["AccumFlow"] = []
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["RateFlow"] = []
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["FlowDate"] = []
 
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["DBDateSAve"] = None
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["HasFlow"] = False
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"] = None
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["HasFlow"] = False
 
-                    flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["AccumFlow"].append(flowAccum)
-                    flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["RateFlow"].append(flowRate)
-                    flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["FlowDate"].append(dataRead["DateTime"])
+                    flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["AccumFlow"].append(flowAccum)
+                    flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["RateFlow"].append(flowRate)
+                    flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["FlowDate"].append(dataRead["DateTime"])
 
                     # check if last save DB too long add new value
                     need2Save2DB = False
 
                     # If first data need to save to DB
-                    if flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["DBDateSAve"] == None:
+                    if flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"] == None:
                         need2Save2DB = True
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["HasFlow"] = flowRate > 0.001
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["HasFlow"] = flowRate > 0.001
                     elif flowRate > 0.001:
                         # if with flow and delta time = 0 save any data
-                        if localDef["RateWithFlow"] == 0 or \
-                            (localDef["RateWithFlow"] > 0 and (dataRead["DateTime"] - flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["DBDateSAve"]).total_seconds() / 60.0 > localDef["RateWithFlow"]):
+                        if commandsFlowM["RateWithFlow"] == 0 or \
+                            (commandsFlowM["RateWithFlow"] > 0 and (dataRead["DateTime"] - flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"]).total_seconds() / 60.0 > commandsFlowM["RateWithFlow"]):
                             need2Save2DB = True
-                            flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["HasFlow"] = True
+                            flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["HasFlow"] = True
                     elif flowRate <= 0.001 and \
-                        (flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["HasFlow"] and localDef["RateWitoutFlow"] == 0) or \
-                        (localDef["RateWitoutFlow"] > 0 and (dataRead["DateTime"] - flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["DBDateSAve"]).total_seconds() / 60.0 > localDef["RateWitoutFlow"]):
+                        (flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["HasFlow"] and commandsFlowM["RateWitoutFlow"] == 0) or \
+                        (commandsFlowM["RateWitoutFlow"] > 0 and (dataRead["DateTime"] - flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"]).total_seconds() / 60.0 > commandsFlowM["RateWitoutFlow"]):
                         need2Save2DB = True
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["HasFlow"] = False
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["HasFlow"] = False
 
                     if need2Save2DB:
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["DBDateSAve"] = dataRead["DateTime"]
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"] = dataRead["DateTime"]
 
                     # check if any problem with flow
                     # TODO
 
-                    if len(flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["AccumFlow"]) > 100:
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["AccumFlow"].remove(0)
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["RateFlow"].remove(0)
-                        flowDataOnDemand["FL-" + localDef["FlowRef"][i]]["FlowDate"].remove(0)
-                    flowDataOnDemandLock.release()
+                    if len(flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["AccumFlow"]) > 100:
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["AccumFlow"].remove(0)
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["RateFlow"].remove(0)
+                        flowDataOnDemand["FL-" + commandsFlowM["FlowRef"][i]]["FlowDate"].remove(0)
 
                     # Outside lock save to DB if case for
                     if need2Save2DB:
                         # save valves if they are active
-                        listValues2Add = []
-
-                        valveFlowLock.acquire()
                         for j in range(len(gv.srvals)):
-                            if gv.srvals[j] and j in localDef["ValvesAffected"][i]:  # station is on
+                            if j + 1 > len(valveFlowLastFlowReading):
+                                valveFlowLastFlowReading.append({})
+                                valveFlowCurrentVal.append(0)
+
+                            if gv.srvals[j] and j in commandsFlowM["ValvesAffected"][i]:  # station is on
                                 numberValvesActive = 0.0
                                 for l in range(len(gv.srvals)):
-                                    if gv.srvals[j] and l in localDef["ValvesAffected"][i]:  # station is on
+                                    if gv.srvals[j] and l in commandsFlowM["ValvesAffected"][i]:  # station is on
                                         numberValvesActive = numberValvesActive + 1.0
 
                                 # save to DB flow accumulate dividing by activated valves
-                                if localDef["FlowRef"][i] in valveFlowLastFlowReading[j]:
-                                    valveDif = flowAccum - valveFlowLastFlowReading[j][localDef["FlowRef"][i]]
+                                if commandsFlowM["FlowRef"][i] in valveFlowLastFlowReading[j]:
+                                    valveDif = flowAccum - valveFlowLastFlowReading[j][commandsFlowM["FlowRef"][i]]
                                     valveFlowCurrentVal[j] = valveFlowCurrentVal[j] + (valveDif / numberValvesActive)
 
-                                    listValues2Add.append([j, valveFlowCurrentVal[j], flowRate / numberValvesActive])
+                                    listValuesValves2Add["Valve"+ str(j)] = [j, valveFlowCurrentVal[j], flowRate / numberValvesActive, dataRead["DateTime"]]
 
-                                valveFlowLastFlowReading[j][localDef["FlowRef"][i]] = flowAccum
-                        valveFlowLock.release()
+                                valveFlowLastFlowReading[j][commandsFlowM["FlowRef"][i]] = flowAccum
 
                         # save raw data
-                        check_and_add_flow(dbDefinitions, localDef["FlowRef"][i], localDef["SensorPort"][i], localDef["CorrectionFactor"][i], localDef["SlowPulse"][i])
-                        add_new_register(dbDefinitions, localDef["FlowRef"][i], flowRate, flowAccum, dataRead["DateTime"])
+                        listFlow2Save.append([commandsFlowM["FlowRef"][i], commandsFlowM["SensorPort"][i], commandsFlowM["CorrectionFactor"][i], commandsFlowM["SlowPulse"][i], flowRate, flowAccum, dataRead["DateTime"]])
 
-                        # save data from valves
-                        for dataVal2Save in listValues2Add:
-                            currValveId = dataVal2Save[0]
-                            currValveAccum = dataVal2Save[1]
-                            currValveFlow = dataVal2Save[2]
-                            add_valve_flow(dbDefinitions, currValveId, currValveFlow, currValveAccum, dataRead["DateTime"])
+        commandsFlowMLock.release()
+        valveFlowLock.release()
+        flowDataOnDemandLock.release()
+
+        # save data from flow meters
+        for dataValFlow2Save in listFlow2Save:
+            saveFlowRef = dataValFlow2Save[0]
+            saveSensorPort = dataValFlow2Save[1]
+            saveCorrectionFactor = dataValFlow2Save[2]
+            saveSlowPulse = dataValFlow2Save[3]
+            saveFlowRate = dataValFlow2Save[4]
+            saveAccumRate = dataValFlow2Save[5]
+            saveDateTime = dataValFlow2Save[6]
+
+            check_and_add_flow(dbDefinitions, saveFlowRef, saveSensorPort, saveCorrectionFactor, saveSlowPulse)
+            add_new_register(dbDefinitions, saveFlowRef, saveFlowRate, saveAccumRate, saveDateTime)
+
+        # save data from valves
+        for dataVal2SaveKey in listValuesValves2Add:
+            dataVal2Save = listValuesValves2Add[dataVal2SaveKey]
+
+            currValveId = dataVal2Save[0]
+            currValveAccum = dataVal2Save[1]
+            currValveFlow = dataVal2Save[2]
+            currValveDateTime = dataVal2Save[3]
+            add_valve_flow(dbDefinitions, currValveId, currValveFlow, currValveAccum, currValveDateTime)
 
 def threadProcessDataInc():
     global lastDataFlow, flowIncData, commFlowIncQueu
@@ -191,42 +213,42 @@ def threadProcessDataInc():
         dataRead = commFlowIncQueu.get()
 
         commandsFlowMLock.acquire()
-        localDef = copy.deepcopy(commandsFlowM)
-        commandsFlowMLock.release()
+        flowIncDataLock.acquire()
 
-        for i in range(len(localDef["FlowRef"])):
-            if "FR-" + localDef["FlowRef"][i] in dataRead and "FI-" + localDef["FlowRef"][i] in dataRead and "DateTime" in dataRead:
+        for i in range(len(commandsFlowM["FlowRef"])):
+            if "FR-" + commandsFlowM["FlowRef"][i] in dataRead and "FI-" + commandsFlowM["FlowRef"][i] in dataRead and "DateTime" in dataRead:
                 validNumber = False
                 incrementL = 0
                 try:
-                    incrementL = float(dataRead["FI-" + localDef["FlowRef"][i]])
+                    incrementL = float(dataRead["FI-" + commandsFlowM["FlowRef"][i]])
                     validNumber = True
                 except:
                     pass
 
                 if validNumber:
-                    flowIncDataLock.acquire()
-                    if "F-" + localDef["FlowRef"][i] not in flowIncData:
-                        flowIncData["F-" + localDef["FlowRef"][i]] = {}
-                        flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"] = None
-                        flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] = False
+                    if "F-" + commandsFlowM["FlowRef"][i] not in flowIncData:
+                        flowIncData["F-" + commandsFlowM["FlowRef"][i]] = {}
+                        flowIncData["F-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"] = None
+                        flowIncData["F-" + commandsFlowM["FlowRef"][i]]["HasFlow"] = False
 
-                        if "F-" + localDef["FlowRef"][i] in lastDataFlow:
-                            flowIncData["F-" + localDef["FlowRef"][i]]["Bias"] = lastDataFlow["F-" + localDef["FlowRef"][i]] # bias from last reg
+                        if "F-" + commandsFlowM["FlowRef"][i] in lastDataFlow:
+                            flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Bias"] = lastDataFlow["F-" + commandsFlowM["FlowRef"][i]] # bias from last reg
                         else:
-                            flowIncData["F-" + localDef["FlowRef"][i]]["Bias"] = 0 # if no register, bias is zero
+                            flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Bias"] = 0 # if no register, bias is zero
 
-                        flowIncData["F-" + localDef["FlowRef"][i]]["Read"] = []
-                    if len(flowIncData["F-" + localDef["FlowRef"][i]]["Read"]) > 0:
+                        flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"] = []
+                    if len(flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"]) > 0:
                         # increment from last value
-                        flowIncData["F-" + localDef["FlowRef"][i]]["Read"].append([dataRead['DateTime'], incrementL + flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][1]])
+                        flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"].append([dataRead['DateTime'], incrementL + flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][1]])
                     else:
                         # start from 0 and check if bias from last turn off
-                        flowIncData["F-" + localDef["FlowRef"][i]]["Read"].append([dataRead['DateTime'], incrementL + flowIncData["F-" + localDef["FlowRef"][i]]["Bias"]])
+                        flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"].append([dataRead['DateTime'], incrementL + flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Bias"]])
 
-                    if len(flowIncData["F-" + localDef["FlowRef"][i]]["Read"]) > 20:
-                        del flowIncData["F-" + localDef["FlowRef"][i]]["Read"][0]
-                    flowIncDataLock.release()
+                    if len(flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"]) > 20:
+                        del flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][0]
+                    
+        commandsFlowMLock.release()
+        flowIncDataLock.release()
 
 def threadProcessDataIncCheckStop():
     global commandsFlowMLock, commandsFlowM
@@ -236,19 +258,19 @@ def threadProcessDataIncCheckStop():
     while threadProcFlowIncStopIsRunning:
         time.sleep(1)
 
-        commandsFlowMLock.acquire()
-        localDef = copy.deepcopy(commandsFlowM)
-        commandsFlowMLock.release()
-
         # from all flow increment check if singal stop
         data2SaveDBList = [] # [FlowRate, DateTime, AccumInLiters]
+        listValuesValves2Add = {}
 
+        commandsFlowMLock.acquire()
         flowIncDataLock.acquire()
-        for i in range(len(localDef["FlowRef"])):
-            if "F-" + localDef["FlowRef"][i] in flowIncData and len(flowIncData["F-" + localDef["FlowRef"][i]]["Read"]) > 4:
+        valveFlowLock.acquire()
+
+        for i in range(len(commandsFlowM["FlowRef"])):
+            if "F-" + commandsFlowM["FlowRef"][i] in flowIncData and len(flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"]) > 4:
                 diffTimesList = []
-                for j in range(1, len(flowIncData["F-" + localDef["FlowRef"][i]]["Read"])):
-                    diffTimesList.append((flowIncData["F-" + localDef["FlowRef"][i]]["Read"][j][0] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][j - 1][0]).total_seconds())
+                for j in range(1, len(flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"])):
+                    diffTimesList.append((flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][j][0] - flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][j - 1][0]).total_seconds())
 
                 # estimate median
                 diffTimesList.sort()
@@ -256,39 +278,80 @@ def threadProcessDataIncCheckStop():
                 resMed = (diffTimesList[mid] + diffTimesList[~mid]) / 2.0
 
                 # if median > 2X last reading, considering STOP
-                isStop = (datetime.datetime.now() - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0]).total_seconds() > 2*resMed
+                isStop = (datetime.datetime.now() - flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][0]).total_seconds() > 2*resMed
                 if isStop:
-                    flowIncData["F-" + localDef["FlowRef"][i]]["FlowRate"] = 0
+                    flowIncData["F-" + commandsFlowM["FlowRef"][i]]["FlowRate"] = 0
                 else:
-                    last2RegDif = (flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-2][0]).total_seconds()
+                    last2RegDif = (flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][0] - flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-2][0]).total_seconds()
                     if last2RegDif <= 2*resMed:
-                        litersBetweenReading = flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][1] - flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-2][1]
-                        flowIncData["F-" + localDef["FlowRef"][i]]["FlowRate"] = litersBetweenReading / (last2RegDif / 60.0)
+                        litersBetweenReading = flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][1] - flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-2][1]
+                        flowIncData["F-" + commandsFlowM["FlowRef"][i]]["FlowRate"] = litersBetweenReading / (last2RegDif / 60.0)
                     else:
-                        flowIncData["F-" + localDef["FlowRef"][i]]["FlowRate"] = 0
+                        flowIncData["F-" + commandsFlowM["FlowRef"][i]]["FlowRate"] = 0
 
                 need2AddDB = False
 
-                if flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"] == None:
+                if flowIncData["F-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"] == None:
                     need2AddDB = True
                 elif isStop:
-                    if flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] or localDef["RateWitoutFlow"] == 0 or \
-                        (localDef["RateWitoutFlow"] > 0 and (datetime.datetime.now() - flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"]).total_seconds()  / 60.0 > localDef["RateWitoutFlow"]):
+                    if flowIncData["F-" + commandsFlowM["FlowRef"][i]]["HasFlow"] or commandsFlowM["RateWitoutFlow"] == 0 or \
+                        (commandsFlowM["RateWitoutFlow"] > 0 and (datetime.datetime.now() - flowIncData["F-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"]).total_seconds()  / 60.0 > commandsFlowM["RateWitoutFlow"]):
                         need2AddDB = True
-                    flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] = False # no flow detected in valve
+                    flowIncData["F-" + commandsFlowM["FlowRef"][i]]["HasFlow"] = False # no flow detected in valve
                 elif not isStop:
                     # wather is passing
-                    if localDef["RateWithFlow"] == 0 or not flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] or (localDef["RateWithFlow"] > 0 and (flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0] - flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"]).total_seconds() / 60.0 > localDef["RateWithFlow"]):
+                    if commandsFlowM["RateWithFlow"] == 0 or not flowIncData["F-" + commandsFlowM["FlowRef"][i]]["HasFlow"] or (commandsFlowM["RateWithFlow"] > 0 and (flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][0] - flowIncData["F-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"]).total_seconds() / 60.0 > commandsFlowM["RateWithFlow"]):
                         need2AddDB = True
 
                 if need2AddDB:
-                    data2SaveDBList.append([flowIncData["F-" + localDef["FlowRef"][i]]["FlowRate"], flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0], flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][1], localDef["FlowRef"][i]])
-                    flowIncData["F-" + localDef["FlowRef"][i]]["DBDateSAve"] = flowIncData["F-" + localDef["FlowRef"][i]]["Read"][-1][0]
-                    flowIncData["F-" + localDef["FlowRef"][i]]["HasFlow"] = not isStop
+                    data2SaveDBList.append([flowIncData["F-" + commandsFlowM["FlowRef"][i]]["FlowRate"], flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][0], flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][1], commandsFlowM["FlowRef"][i]])
+                    flowIncData["F-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"] = flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][0]
+                    flowIncData["F-" + commandsFlowM["FlowRef"][i]]["HasFlow"] = not isStop
+
+                    # check valves flow, TODO
+                    # save valves if they are active
+                    for j in range(len(gv.srvals)):
+                        if j + 1 > len(valveFlowLastFlowReading):
+                            valveFlowLastFlowReading.append({})
+                            valveFlowCurrentVal.append(0)
+
+                        if gv.srvals[j] and j in commandsFlowM["ValvesAffected"][i]:  # station is on
+                                numberValvesActive = 0.0
+                                for l in range(len(gv.srvals)):
+                                    if gv.srvals[l] and l in commandsFlowM["ValvesAffected"][i]:  # station is on
+                                        numberValvesActive = numberValvesActive + 1.0
+
+                                # save to DB flow accumulate dividing by activated valves
+                                if commandsFlowM["FlowRef"][i] in valveFlowLastFlowReading[j]:
+                                    valveDif = flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][1] - valveFlowLastFlowReading[j][commandsFlowM["FlowRef"][i]]
+                                    valveFlowCurrentVal[j] = valveFlowCurrentVal[j] + (valveDif / numberValvesActive)
+
+                                    listValuesValves2Add["Valve"+ str(j)] = [j, valveFlowCurrentVal[j], flowIncData["F-" + commandsFlowM["FlowRef"][i]]["FlowRate"] / numberValvesActive, flowIncData["F-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"]]
+
+                                valveFlowLastFlowReading[j][commandsFlowM["FlowRef"][i]] = flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][1]
+
+
+        commandsFlowMLock.release()
         flowIncDataLock.release()
+        valveFlowLock.release()
 
         for data2SaveDB in data2SaveDBList:
-            add_new_register(dbDefinitions, data2SaveDB[3], data2SaveDB[0], data2SaveDB[2], data2SaveDB[1])
+            flowRateSave = data2SaveDB[0]
+            flowDateTime = data2SaveDB[1]
+            flowAccumValue = data2SaveDB[2]
+            flowRefSave = data2SaveDB[3]
+
+            add_new_register(dbDefinitions, flowRefSave, flowRateSave, flowAccumValue, flowDateTime)
+
+        # save data from valves
+        for dataVal2SaveKey in listValuesValves2Add:
+            dataVal2Save = listValuesValves2Add[dataVal2SaveKey]
+
+            currValveId = dataVal2Save[0]
+            currValveAccum = dataVal2Save[1]
+            currValveFlow = dataVal2Save[2]
+            currValveDateTime = dataVal2Save[3]
+            add_valve_flow(dbDefinitions, currValveId, currValveFlow, currValveAccum, currValveDateTime)
 
 def load_flows():
     global commandsFlowM, threadProcFlowIsRunning, threadProcFlow, threadProcFlowIncIsRunning, threadProcFlowInc, threadProcFlowIncStopIsRunning, threadProcFlowIncStop, lastDataFlow
