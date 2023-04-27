@@ -72,6 +72,9 @@ threadProcFlowIncStopIsRunning = False # THread flow increment is running
 flowIncData = {} # Data of increment values
 flowIncDataLock = Lock()
 
+threadDevicesFlowAfected = None
+threadDevicesFlowAfectedIsRunning = False
+
 # variables related to each valves flow
 valveFlowCurrentVal = []
 valveFlowLastFlowReading = []
@@ -155,27 +158,6 @@ def threadProcessData():
 
                     # Outside lock save to DB if case for
                     if need2Save2DB:
-                        # save valves if they are active
-                        for j in range(len(gv.srvals)):
-                            if j + 1 > len(valveFlowLastFlowReading):
-                                valveFlowLastFlowReading.append({})
-                                valveFlowCurrentVal.append(0)
-
-                            if gv.srvals[j] and j in commandsFlowM["ValvesAffected"][i]:  # station is on
-                                numberValvesActive = 0.0
-                                for l in range(len(gv.srvals)):
-                                    if gv.srvals[j] and l in commandsFlowM["ValvesAffected"][i]:  # station is on
-                                        numberValvesActive = numberValvesActive + 1.0
-
-                                # save to DB flow accumulate dividing by activated valves
-                                if commandsFlowM["FlowRef"][i] in valveFlowLastFlowReading[j]:
-                                    valveDif = flowAccum - valveFlowLastFlowReading[j][commandsFlowM["FlowRef"][i]]
-                                    valveFlowCurrentVal[j] = valveFlowCurrentVal[j] + (valveDif / numberValvesActive)
-
-                                    listValuesValves2Add["Valve"+ str(j)] = [j, valveFlowCurrentVal[j], flowRate / numberValvesActive, dataRead["DateTime"]]
-
-                                valveFlowLastFlowReading[j][commandsFlowM["FlowRef"][i]] = flowAccum
-
                         # save raw data
                         listFlow2Save.append([commandsFlowM["FlowRef"][i], commandsFlowM["SensorPort"][i], commandsFlowM["CorrectionFactor"][i], commandsFlowM["SlowPulse"][i], flowRate, flowAccum, dataRead["DateTime"]])
 
@@ -260,11 +242,9 @@ def threadProcessDataIncCheckStop():
 
         # from all flow increment check if singal stop
         data2SaveDBList = [] # [FlowRate, DateTime, AccumInLiters]
-        listValuesValves2Add = {}
 
         commandsFlowMLock.acquire()
         flowIncDataLock.acquire()
-        valveFlowLock.acquire()
 
         for i in range(len(commandsFlowM["FlowRef"])):
             if "F-" + commandsFlowM["FlowRef"][i] in flowIncData and len(flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"]) > 4:
@@ -308,32 +288,8 @@ def threadProcessDataIncCheckStop():
                     flowIncData["F-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"] = flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][0]
                     flowIncData["F-" + commandsFlowM["FlowRef"][i]]["HasFlow"] = not isStop
 
-                    # check valves flow, TODO
-                    # save valves if they are active
-                    for j in range(len(gv.srvals)):
-                        if j + 1 > len(valveFlowLastFlowReading):
-                            valveFlowLastFlowReading.append({})
-                            valveFlowCurrentVal.append(0)
-
-                        if gv.srvals[j] and j in commandsFlowM["ValvesAffected"][i]:  # station is on
-                                numberValvesActive = 0.0
-                                for l in range(len(gv.srvals)):
-                                    if gv.srvals[l] and l in commandsFlowM["ValvesAffected"][i]:  # station is on
-                                        numberValvesActive = numberValvesActive + 1.0
-
-                                # save to DB flow accumulate dividing by activated valves
-                                if commandsFlowM["FlowRef"][i] in valveFlowLastFlowReading[j]:
-                                    valveDif = flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][1] - valveFlowLastFlowReading[j][commandsFlowM["FlowRef"][i]]
-                                    valveFlowCurrentVal[j] = valveFlowCurrentVal[j] + (valveDif / numberValvesActive)
-
-                                    listValuesValves2Add["Valve"+ str(j)] = [j, valveFlowCurrentVal[j], flowIncData["F-" + commandsFlowM["FlowRef"][i]]["FlowRate"] / numberValvesActive, flowIncData["F-" + commandsFlowM["FlowRef"][i]]["DBDateSAve"]]
-
-                                valveFlowLastFlowReading[j][commandsFlowM["FlowRef"][i]] = flowIncData["F-" + commandsFlowM["FlowRef"][i]]["Read"][-1][1]
-
-
         commandsFlowMLock.release()
         flowIncDataLock.release()
-        valveFlowLock.release()
 
         for data2SaveDB in data2SaveDBList:
             flowRateSave = data2SaveDB[0]
@@ -343,18 +299,113 @@ def threadProcessDataIncCheckStop():
 
             add_new_register(dbDefinitions, flowRefSave, flowRateSave, flowAccumValue, flowDateTime)
 
-        # save data from valves
-        for dataVal2SaveKey in listValuesValves2Add:
-            dataVal2Save = listValuesValves2Add[dataVal2SaveKey]
+def threadProcessDevicesAfectedByFlow():
+    global threadDevicesFlowAfectedIsRunning, commandsFlowMLock, flowIncDataLock, flowDataOnDemandLock, valveFlowLock, valveFlowLastFlowReading, valveFlowCurrentVal
 
-            currValveId = dataVal2Save[0]
-            currValveAccum = dataVal2Save[1]
-            currValveFlow = dataVal2Save[2]
-            currValveDateTime = dataVal2Save[3]
-            add_valve_flow(dbDefinitions, currValveId, currValveFlow, currValveAccum, currValveDateTime)
+    dbDefinitions = db_logger_read_definitions()
+
+    priorFlow = gv.srvals[:]
+    curretntValveState = gv.srvals[:]
+    numberOfValves  = len(gv.srvals)
+
+    lastTimeSaveValve2DB = []
+    for i in range(len(gv.srvals)):
+        lastTimeSaveValve2DB.append(None)
+
+    while threadDevicesFlowAfectedIsRunning:
+        time.sleep(1)
+
+        if numberOfValves > len(gv.srvals):
+            priorFlow = priorFlow[:len(gv.srvals)]
+            lastTimeSaveValve2DB = lastTimeSaveValve2DB[:len(gv.srvals)]
+        elif numberOfValves < len(gv.srvals):
+            priorFlow = gv.srvals[:]
+            for i in range(numberOfValves, gv.srvals):
+                lastTimeSaveValve2DB.append(None)
+
+        numberOfValves  = len(gv.srvals)
+        curretntValveState = gv.srvals[:]
+
+        list2SaveDB = []
+
+        commandsFlowMLock.acquire()
+        flowIncDataLock.acquire()
+        flowDataOnDemandLock.acquire()
+        valveFlowLock.acquire()
+
+        if len(valveFlowLastFlowReading) > numberOfValves:
+            valveFlowLastFlowReading = valveFlowLastFlowReading[:numberOfValves]
+            valveFlowCurrentVal = valveFlowCurrentVal[:numberOfValves]
+        elif len(valveFlowLastFlowReading) < numberOfValves:
+            difOfLen = numberOfValves - len(valveFlowLastFlowReading)
+            for i in range(difOfLen):
+                valveFlowLastFlowReading.append({})
+                valveFlowCurrentVal.append(0)
+
+        for i in range(numberOfValves):
+            # check if valve affected by any valve
+            afectedByFlow = False
+            for j in range(len(commandsFlowM["ValvesAffected"])):
+                if i in commandsFlowM["ValvesAffected"][j]:
+                    afectedByFlow = True
+
+            if afectedByFlow:
+                # if start on and before of save to DB flow or on by last reading to long or on and turn to off
+                if (curretntValveState[i] and not priorFlow[i]) or (curretntValveState[i] and lastTimeSaveValve2DB[i] != None and (datetime.datetime.now() - lastTimeSaveValve2DB[i]).total_seconds()  / 60.0 > 1.0) or (not curretntValveState[i] and priorFlow[i]):
+                    currentDate2Save = datetime.datetime.now()
+                    lastTimeSaveValve2DB[i] = currentDate2Save
+
+                    # count for each valve number active valves
+                    numberActiveValves = []
+                    for k in range(len(commandsFlowM["ValvesAffected"])):
+                        numberActiveValves.append(0)
+                        for l in range(numberOfValves):
+                            if (curretntValveState[l] or (not curretntValveState[l] and priorFlow[l])) and l in commandsFlowM["ValvesAffected"][k]:
+                                numberActiveValves[k] = numberActiveValves[k] + 1.0
+
+                        # check number of tanks
+                        # TODO
+
+                    currentFlow = 0
+
+                    for k in range(len(commandsFlowM["ValvesAffected"])):
+                        currentData = getFlowReading(commandsFlowM["FlowRef"][k], False)
+
+                        if i in commandsFlowM["ValvesAffected"][k]:
+                            if commandsFlowM["FlowRef"][k] in valveFlowLastFlowReading[i]:
+                                lastValue = valveFlowLastFlowReading[i][commandsFlowM["FlowRef"][k]]
+                                valveFlowCurrentVal[i] = valveFlowCurrentVal[i] + (currentData["AccumFlow"] - lastValue) / numberActiveValves[k]
+
+                            # else:  sum 0 to total accum, need at least a previous reading, by can increment flow
+
+                            valveFlowLastFlowReading[i][commandsFlowM["FlowRef"][k]] = currentData["AccumFlow"] # save current as last
+                            currentFlow = currentFlow + currentData["RateFlow"] / numberActiveValves[k]
+
+                    list2SaveDB.append([valveFlowCurrentVal[i], currentFlow, i, currentDate2Save])
+
+            # for all off valve crean last flow reading
+            if not curretntValveState[i]:
+                valveFlowLastFlowReading[i] = {}
+
+        commandsFlowMLock.release()
+        flowIncDataLock.release()
+        flowDataOnDemandLock.release()
+        valveFlowLock.release()
+
+        priorFlow = curretntValveState
+
+        # Save to DB
+        for curr2Save in list2SaveDB:
+            currentAccum2Save = curr2Save[0]
+            currentFlow2Save = curr2Save[1]
+            valve2Save = curr2Save[2]
+            dateTime = curr2Save[3]
+
+            add_valve_flow(dbDefinitions, valve2Save, currentFlow2Save, currentAccum2Save, dateTime)
+
 
 def load_flows():
-    global commandsFlowM, threadProcFlowIsRunning, threadProcFlow, threadProcFlowIncIsRunning, threadProcFlowInc, threadProcFlowIncStopIsRunning, threadProcFlowIncStop, lastDataFlow
+    global commandsFlowM, threadProcFlowIsRunning, threadProcFlow, threadProcFlowIncIsRunning, threadProcFlowInc, threadProcFlowIncStopIsRunning, threadProcFlowIncStop, lastDataFlow, threadDevicesFlowAfectedIsRunning, threadDevicesFlowAfected
 
     try:
         with open(u"./data/flow_multi_remote.json", u"r") as f:
@@ -394,18 +445,23 @@ def load_flows():
     threadProcFlowIncStop = Thread(target = threadProcessDataIncCheckStop)
     threadProcFlowIncStop.start()
 
+    threadDevicesFlowAfectedIsRunning = True
+    threadDevicesFlowAfected = Thread(target = threadProcessDevicesAfectedByFlow)
+    threadDevicesFlowAfected.start()
+
 load_flows()
 
-def getFlowReading(flowRef):
+def getFlowReading(flowRef, useLocks = True):
     global commandsFlowMLock, commandsFlowM, flowIncDataLock, flowIncData, flowDataOnDemandLock, flowDataOnDemand
 
     dataOut = {}
 
     dataOut["IsValid"] = False
 
-    commandsFlowMLock.acquire()
-    flowIncDataLock.acquire()
-    flowDataOnDemandLock.acquire()
+    if useLocks:
+        commandsFlowMLock.acquire()
+        flowIncDataLock.acquire()
+        flowDataOnDemandLock.acquire()
             
     # check in arduino sensors
     if "FL-" + flowRef in flowDataOnDemand:
@@ -428,9 +484,10 @@ def getFlowReading(flowRef):
         dataOut["AccumFlow"] = lastDataFlow["F-" + flowRef]
         dataOut["IsValid"] = True
 
-    flowDataOnDemandLock.release()
-    flowIncDataLock.release()
-    commandsFlowMLock.release()
+    if useLocks:
+        flowDataOnDemandLock.release()
+        flowIncDataLock.release()
+        commandsFlowMLock.release()
 
     return dataOut
 
